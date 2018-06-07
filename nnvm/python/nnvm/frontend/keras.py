@@ -23,6 +23,10 @@ def _get_pad_pair(input1d, kernel1d, stride1d):
     pad_after = pad - pad_before
     return [pad_before, pad_after]
 
+def _get_elu(insym, alpha):
+    """ A helper method for elu.
+    """
+    return -alpha * _sym.relu(1 - _sym.exp(insym)) + _sym.relu(insym)
 
 def _convert_activation(insym, keras_layer, _):
     if isinstance(keras_layer, str):
@@ -50,27 +54,43 @@ def _convert_activation(insym, keras_layer, _):
     elif act_type == 'softplus':
         return _sym.log(_sym.__add_scalar__(_sym.exp(insym), scalar=1))
     elif act_type == 'elu':
-        raise NotImplementedError('elu not implemented')
+        alpha = keras_layer.alpha if hasattr(keras_layer, "alpha") else 1
+        return _get_elu(insym, alpha)
+    elif act_type == 'selu':
+        # Alpha, Gamma values, obtained from  https://arxiv.org/abs/1706.02515
+        alpha = keras_layer.alpha if hasattr(keras_layer, "alpha") else 1.6732
+        gamma = keras_layer.gamma if hasattr(keras_layer, "gamma") else 1.0507
+        return gamma * _get_elu(insym, alpha)
     elif act_type == 'relu6':
         return _sym.clip(insym, a_min=0, a_max=6)
     elif act_type == 'softsign':
-        raise NotImplementedError('softsign not implemented')
+        return insym / (1 + (_sym.relu(insym) + _sym.relu(_sym.negative(insym))))
     elif act_type == 'hard_sigmoid':
-        raise NotImplementedError('hard_sigmoid not implemented')
+        transformX = (0.2 * insym) + 0.5
+        return _sym.clip(transformX, a_min=0, a_max=1)
     else:
         raise TypeError("Unsupported activation type : {}".format(act_type))
 
 
-def _convert_advanced_activation(insym, keras_layer, _):
+def _convert_advanced_activation(insym, keras_layer, symtab):
     act_type = type(keras_layer).__name__
     if act_type == 'LeakyReLU':
         return _sym.leaky_relu(insym, alpha=keras_layer.alpha)
     elif act_type == 'ELU':
-        raise NotImplementedError('ELU not implemented')
+        alpha = keras_layer.alpha if hasattr(keras_layer, "alpha") else 1
+        return _get_elu(insym, alpha)
     elif act_type == 'PReLU':
-        raise NotImplementedError('PReLU not implemented')
+        assert hasattr(keras_layer, "alpha"), \
+            "alpha required for PReLU."
+        _check_data_format(keras_layer)
+        size = len(keras_layer.alpha.shape)
+        return -symtab.new_const(keras_layer.get_weights()[0] \
+                                 .transpose(np.roll(range(size), 1))) \
+                                 * _sym.relu(-insym) + _sym.relu(insym)
     elif act_type == 'ThresholdedReLU':
-        raise NotImplementedError('ThresholdedReLU not implemented')
+        theta = keras_layer.theta if hasattr(keras_layer, "theta") else 1.0
+        theta_tensor = _sym.full_like(insym[0], fill_value=float(theta))
+        return _sym.elemwise_mul(insym[0], _sym.greater(insym[0], theta_tensor, out_type="float32"))
     else:
         raise TypeError("Unsupported advanced activation type : {}".format(act_type))
 
@@ -152,8 +172,8 @@ def _convert_convolution(insym, keras_layer, symtab):
         pass
     # we insert a separate pad operator
     elif keras_layer.padding == 'same':
-        in_h = keras_layer.input.shape[1].value
-        in_w = keras_layer.input.shape[2].value
+        in_h = keras_layer.input_shape[1]
+        in_w = keras_layer.input_shape[2]
         pad_t, pad_b = _get_pad_pair(in_h, kernel_h, stride_h)
         pad_l, pad_r = _get_pad_pair(in_w, kernel_w, stride_w)
         insym = _sym.pad(data=insym, pad_width=((0, 0), (0, 0), (pad_t, pad_b), (pad_l, pad_r)))
@@ -192,8 +212,8 @@ def _convert_separable_convolution(insym, keras_layer, symtab):
         pass
     # we insert a separate pad operator
     elif keras_layer.padding == 'same':
-        in_h = keras_layer.input.shape[1].value
-        in_w = keras_layer.input.shape[2].value
+        in_h = keras_layer.input_shape[1]
+        in_w = keras_layer.input_shape[2]
         pad_t, pad_b = _get_pad_pair(in_h, kernel_h, stride_h)
         pad_l, pad_r = _get_pad_pair(in_w, kernel_w, stride_w)
         insym = _sym.pad(data=insym, pad_width=(
@@ -249,8 +269,8 @@ def _convert_pooling(insym, keras_layer, symtab):
             pass
         # we insert a separate pad operator
         elif keras_layer.padding == 'same':
-            in_h = keras_layer.input.shape[1].value
-            in_w = keras_layer.input.shape[2].value
+            in_h = keras_layer.input_shape[1]
+            in_w = keras_layer.input_shape[2]
             pad_t, pad_b = _get_pad_pair(in_h, pool_h, stride_h)
             pad_l, pad_r = _get_pad_pair(in_w, pool_w, stride_w)
             insym = _sym.pad(data=insym, pad_width=(
@@ -475,25 +495,33 @@ def from_keras(model):
     symtab = SymbolTable()
     for keras_layer in model.layers:
         if isinstance(keras_layer, keras.engine.topology.InputLayer):
-            keras_layer.name = 'data'
             symtab.get_var(keras_layer.name, must_contain=False)
         else:
-            predecessors = []
             inbound_nodes = keras_layer.inbound_nodes if hasattr(keras_layer, 'inbound_nodes') \
                        else keras_layer._inbound_nodes if hasattr(keras_layer, '_inbound_nodes') \
                        else None
             if inbound_nodes is None:
                 raise TypeError("Unknown layer type or unsupported Keras version : {}"
                                 .format(keras_layer))
-            for node in inbound_nodes:
-                for pred in node.inbound_layers:
-                    predecessors.append(pred.name)
-            if len(predecessors) == 1:
-                insym = symtab.get_var(predecessors[0], must_contain=True)
-            else:
-                insym = [symtab.get_var(pred, must_contain=True) for pred in predecessors]
-            keras_op_to_nnvm(insym, keras_layer, keras_layer.name, symtab)
+            for my_idx, node in enumerate(inbound_nodes):
+                insym = []
 
-    returns = [symtab.get_var(i.name, must_contain=False) for i in model.output_layers]
+                # Since Keras allows creating multiple layers from the same name instance,
+                # we append node index to the symbol name to make it unique.
+                # The one exception is InputLayer.  Changing input variable names after conversion
+                # would confuse users, so we should keep them as far as possible.  Fortunately,
+                # they are named uniquely to input_1, input_2, input_3 ... by default.
+                for pred_idx, pred in zip(node.node_indices, node.inbound_layers):
+                    if isinstance(pred, keras.engine.topology.InputLayer):
+                        _sym = symtab.get_var(pred.name, must_contain=True)
+                    else:
+                        _sym = symtab.get_var(pred.name + ':' + str(pred_idx), must_contain=True)
+                    insym.append(_sym)
+
+                if len(insym) == 1:
+                    insym = insym[0]
+                keras_op_to_nnvm(insym, keras_layer, keras_layer.name + ':' + str(my_idx), symtab)
+
+    outsym = symtab.get_var(model.output_layers[0].name + ':0')
     tvmparams = {k:tvm.nd.array(np.array(v, dtype=np.float32)) for k, v in symtab.params.items()}
-    return returns[0], tvmparams
+    return outsym, tvmparams
