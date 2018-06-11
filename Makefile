@@ -25,7 +25,7 @@ UNAME_S := $(shell uname -s)
 
 # The flags
 LLVM_CFLAGS= -fno-rtti -DDMLC_ENABLE_RTTI=0 -DDMLC_USE_FOPEN64=0
-LDFLAGS = -pthread -lm -ldl -Wl,-Bsymbolic-functions
+LDFLAGS = -pthread -lm -ldl
 INCLUDE_FLAGS = -Iinclude -I$(DLPACK_PATH)/include -I$(DMLC_CORE_PATH)/include -IHalideIR/src -Itopi/include
 CFLAGS = -std=c++11 -Wall -O2 $(INCLUDE_FLAGS) -fPIC
 PKG_LDFLAGS =
@@ -233,6 +233,7 @@ else
 	else
 		JVM_PKG_PROFILE := linux-x86_64
 		SHARED_LIBRARY_SUFFIX := so
+		LDFLAGS += -Wl,-Bsymbolic-functions
 	endif
 endif
 
