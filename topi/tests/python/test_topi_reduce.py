@@ -148,7 +148,7 @@ def verify_elemwise_after_reduce(in_shape, axis, keepdims, dtype="float32"):
         with tvm.target.create(device):
             s = topi.generic.schedule_reduce(B)
 
-        fun = tvm.build(s, [A, B], device, name=type)
+        fun = tvm.build(s, [A, B], device, "sum")
         # Test
         in_npy = np.random.uniform(size=in_shape).astype(dtype)
         out_npy = in_npy.sum(axis=axis, keepdims=keepdims) / x
