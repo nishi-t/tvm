@@ -6,15 +6,12 @@ from .. import tag
 from .. import generic
 from .injective import _schedule_injective
 
-def _schedule_reduce(op, sch, is_idx_reduce=False, after_ops=[]):
+def _schedule_reduce(op, sch, is_idx_reduce=False, bcast_ops=[]):
     if is_idx_reduce:
         data_out = op.input_tensors[0]
     else:
         data_in = op.input_tensors[0]
         data_out = op.output(0)
-
-    print("DEBUG(_schedule_reduce):", op)
-    print("DEBUG(_schedule_reduce):", data_out)
 
     if not sch[data_out].op.reduce_axis:
         return _schedule_injective(op, sch)
@@ -70,13 +67,21 @@ def _schedule_reduce(op, sch, is_idx_reduce=False, after_ops=[]):
                                            sch[real_output].op.axis[0])
             sch[temp_val_input].compute_at(sch[real_output],
                                            sch[real_output].op.axis[0])
-    if len(after_ops) > 0:
-        bcast_op = after_ops[0]
+    if len(bcast_ops) > 0:
+        ops = bcast_ops[1:]
+        for op in ops:
+            sch[op].compute_inline()
+        bcast_op = bcast_ops[0]
         x = bcast_op.output(0)
         fused = sch[x].fuse(*sch[x].op.axis)
         bx, tx = sch[x].split(fused, factor=num_thread)
-        sch[real_output].compute_at(sch[bcast_op], tx)
-        sch[bcast_op].bind(tx, thread_x)
+        if not all_reduce:
+            sch[real_output].compute_at(sch[bcast_op], bx)
+            sch[bcast_op].bind(tx, thread_y)
+            sch[bcast_op].bind(bx, block_x)
+        else:
+            sch[real_output].compute_at(sch[bcast_op], tx)
+            sch[bcast_op].bind(tx, thread_x)
         sch[bcast_op].set_store_predicate(thread_x.equal(0))
     else:
         sch[real_output].set_store_predicate(thread_x.equal(0))
@@ -121,19 +126,13 @@ def schedule_reduce(outs):
         """Internal travserse function"""
         if tag.is_broadcast(operator.tag):
             after_broadcast_ops.append(operator)
-            print("DEBUG:", operator)
-            print("DEBUG:", operator.output(0))
-            print("DEBUG: operator.input_tensors[0].op = ", operator.input_tensors[0].op)
-            #_schedule_injective(operator, sch)
-            print("DEBUG: sch[operator.output(0)].op.axis = ", sch[operator.input_tensors[0].op.output(0)].op.reduce_axis)
-            #sch[operator].compute_inline()
-            #sch[operator.input_tensors[0].op].compute_at(sch[operator], sch[operator.input_tensors[0].op.output(0)].op.reduce_axis[0])
             input_tensors = operator.input_tensors
             for tensor in input_tensors:
                 if tensor.op not in scheduled_ops:
                     traverse_after_reduce(tensor.op)
         elif operator.tag == 'comm_reduce':
-            _schedule_reduce(operator, sch, is_idx_reduce=False, after_ops=after_broadcast_ops)
+            _schedule_reduce(operator, sch, is_idx_reduce=False,
+                             bcast_ops=after_broadcast_ops)
             for tensor in operator.input_tensors:
                 if tensor.op not in scheduled_ops:
                     traverse_before_reduce(tensor.op)
