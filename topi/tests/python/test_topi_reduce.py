@@ -163,8 +163,7 @@ def verify_elemwise_after_reduce(in_shape, axis, keepdims, dtype="float32"):
 def test_elemwise_after_reduce_():
     verify_elemwise_after_reduce(in_shape=(128, 24, 128, 24),
                         axis=(1, 2, 3),
-                        keepdims=True,
-                        type="sum")
+                        keepdims=True)
 
 if __name__ == "__main__":
     test_reduce_map()
