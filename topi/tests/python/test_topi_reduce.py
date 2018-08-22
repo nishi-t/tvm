@@ -135,7 +135,8 @@ def test_reduce_map():
 
 def verify_elemwise_after_reduce(in_shape, axis, keepdims, dtype="float32"):
     A = tvm.placeholder(shape=in_shape, name="A", dtype=dtype)
-    B = topi.sum(A, axis=axis, keepdims=keepdims) / 2
+    x = np.random.randint(2, 256, size=shape).astype(dtype)
+    B = topi.sum(A, axis=axis, keepdims=keepdims) / x
     out_dtype = dtype
 
     def check_device(device):
@@ -150,7 +151,7 @@ def verify_elemwise_after_reduce(in_shape, axis, keepdims, dtype="float32"):
         fun = tvm.build(s, [A, B], device, name=type)
         # Test
         in_npy = np.random.uniform(size=in_shape).astype(dtype)
-        out_npy = in_npy.sum(axis=axis, keepdims=keepdims) / 2
+        out_npy = in_npy.sum(axis=axis, keepdims=keepdims) / x
         data_tvm = tvm.nd.array(in_npy, ctx=ctx)
         out_tvm = tvm.nd.empty(shape=out_npy.shape, ctx=ctx, dtype=out_dtype)
         fun(data_tvm, out_tvm)
