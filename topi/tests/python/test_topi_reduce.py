@@ -133,5 +133,38 @@ def test_reduce_map():
                           type="sum",
                           dtype="float64")
 
+def verify_elemwise_after_reduce(in_shape, axis, keepdims, dtype="float32"):
+    A = tvm.placeholder(shape=in_shape, name="A", dtype=dtype)
+    B = topi.sum(A, axis=axis, keepdims=keepdims) / 2
+    out_dtype = dtype
+
+    def check_device(device):
+        ctx = tvm.context(device, 0)
+        if not ctx.exist:
+            print("Skip because %s is not enabled" % device)
+            return
+        print("Running on target: %s" % device)
+        with tvm.target.create(device):
+            s = topi.generic.schedule_reduce(B)
+
+        fun = tvm.build(s, [A, B], device, name=type)
+        # Test
+        in_npy = np.random.uniform(size=in_shape).astype(dtype)
+        out_npy = in_npy.sum(axis=axis, keepdims=keepdims) / 2
+        data_tvm = tvm.nd.array(in_npy, ctx=ctx)
+        out_tvm = tvm.nd.empty(shape=out_npy.shape, ctx=ctx, dtype=out_dtype)
+        fun(data_tvm, out_tvm)
+        np.testing.assert_allclose(out_tvm.asnumpy(), out_npy, 1E-3, 1E-3)
+    for device in ["cuda", "opencl", "metal", "llvm", "rocm", "vulkan", "nvptx"]:
+        check_device(device)
+
+
+def test_elemwise_after_reduce_():
+    verify_elemwise_after_reduce(in_shape=(128, 24, 128, 24),
+                        axis=(1, 2, 3),
+                        keepdims=True,
+                        type="sum")
+
 if __name__ == "__main__":
     test_reduce_map()
+    test_elemwise_after_reduce()
