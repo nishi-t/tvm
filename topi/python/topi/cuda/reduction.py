@@ -137,6 +137,8 @@ def schedule_reduce(outs):
                 if tensor.op not in scheduled_ops:
                     traverse_before_reduce(tensor.op)
         elif operator.tag == 'comm_reduce_idx':
+            if len(after_bloadcast_ops) > 0:
+                raise RuntimeError(" Elementwise op after reduce_idx is not yet supported")
             _schedule_reduce(operator, sch, is_idx_reduce=True)
             input_tensors = operator.input_tensors[0].op.input_tensors
             for tensor in input_tensors:

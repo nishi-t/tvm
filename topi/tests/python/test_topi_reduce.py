@@ -135,7 +135,7 @@ def test_reduce_map():
 
 def verify_elemwise_after_reduce(in_shape, axis, keepdims, dtype="float32"):
     A = tvm.placeholder(shape=in_shape, name="A", dtype=dtype)
-    x = np.random.randint(2, 256, size=shape).astype(dtype)
+    x = np.random.randint(2, 256).astype(dtype)
     B = topi.sum(A, axis=axis, keepdims=keepdims) / x
     out_dtype = dtype
 
