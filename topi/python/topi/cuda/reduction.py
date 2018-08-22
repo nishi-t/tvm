@@ -67,7 +67,7 @@ def _schedule_reduce(op, sch, is_idx_reduce=False, bcast_ops=None):
                                            sch[real_output].op.axis[0])
             sch[temp_val_input].compute_at(sch[real_output],
                                            sch[real_output].op.axis[0])
-    if bcast_ops is not None:
+    if bcast_ops is not None and len(bcast_ops) > 0:
         bops = bcast_ops[1:]
         for bop in bops:
             sch[bop].compute_inline()
