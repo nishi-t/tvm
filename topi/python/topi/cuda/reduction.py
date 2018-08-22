@@ -6,7 +6,7 @@ from .. import tag
 from .. import generic
 from .injective import _schedule_injective
 
-def _schedule_reduce(op, sch, is_idx_reduce=False, bcast_ops=[]):
+def _schedule_reduce(op, sch, is_idx_reduce=False, bcast_ops=None):
     if is_idx_reduce:
         data_out = op.input_tensors[0]
     else:
@@ -67,10 +67,10 @@ def _schedule_reduce(op, sch, is_idx_reduce=False, bcast_ops=[]):
                                            sch[real_output].op.axis[0])
             sch[temp_val_input].compute_at(sch[real_output],
                                            sch[real_output].op.axis[0])
-    if len(bcast_ops) > 0:
-        ops = bcast_ops[1:]
-        for op in ops:
-            sch[op].compute_inline()
+    if bcast_ops is not None:
+        bops = bcast_ops[1:]
+        for bop in bops:
+            sch[bop].compute_inline()
         bcast_op = bcast_ops[0]
         x = bcast_op.output(0)
         fused = sch[x].fuse(*sch[x].op.axis)
