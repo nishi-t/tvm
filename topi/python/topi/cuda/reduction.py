@@ -108,7 +108,7 @@ def schedule_reduce(outs):
         """Internal travserse function"""
         if tag.is_broadcast(operator.tag):
             sch[operator].compute_inline()
-            input_tensors = operator.input_tensors[0].op.input_tensors
+            input_tensors = operator.input_tensors
             for tensor in input_tensors:
                 if tensor.op not in scheduled_ops:
                     traverse_after_reduce(tensor.op)
